@@ -111,6 +111,8 @@ def enrich():
 
 @app.route("/bulk", methods=["GET"])
 def bulk():
+    batch = int(request.args.get("batch", 10))
+    offset = int(request.args.get("offset", 0))
     since = int(time.time()) - 86400
     headers = {"Authorization": f"Bearer {AMO_ACCESS_TOKEN}"}
     contacts = []
@@ -133,13 +135,12 @@ def bulk():
             break
         page += 1
 
+    empty = [c for c in contacts if not c.get("first_name", "").strip() and not c.get("last_name", "").strip()]
+    chunk = empty[offset:offset + batch]
+
     results = []
-    for contact in contacts:
+    for contact in chunk:
         contact_id = contact["id"]
-        first = contact.get("first_name", "").strip()
-        last = contact.get("last_name", "").strip()
-        if first or last:
-            continue
         phone = None
         for field in contact.get("custom_fields_values", []) or []:
             if field.get("field_code") == "PHONE":
@@ -159,7 +160,14 @@ def bulk():
             })
         time.sleep(1)
 
-    return jsonify({"status": "ok", "processed": len(results), "results": results})
+    return jsonify({
+        "status": "ok",
+        "total_empty": len(empty),
+        "offset": offset,
+        "processed": len(results),
+        "next": f"/bulk?offset={offset + batch}" if offset + batch < len(empty) else "done",
+        "results": results
+    })
 
 @app.route("/", methods=["GET"])
 def health():
