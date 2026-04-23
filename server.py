@@ -27,15 +27,21 @@ def search_by_phone(phone):
             data = r.json()
             if not data.get("status") or not data.get("data"):
                 return {}
+            best = {}
             for entry in data["data"]:
-                first = entry.get("first_name", "")
-                last = entry.get("last_name", "")
-                if first or last:
+                first = entry.get("first_name", "").strip()
+                last = entry.get("last_name", "").strip()
+                if first and last:
                     return {
-                        "first_name": first.strip().capitalize(),
-                        "last_name": last.strip().capitalize()
+                        "first_name": first.capitalize(),
+                        "last_name": last.capitalize()
                     }
-            return {}
+                if (first or last) and not best:
+                    best = {
+                        "first_name": first.capitalize(),
+                        "last_name": last.capitalize()
+                    }
+            return best
         except Exception as e:
             print(f"Dyxless attempt {attempt+1} failed: {e}")
             time.sleep(2)
@@ -87,21 +93,17 @@ def enrich():
 
     print(f"Contact ID: {contact_id}")
 
-    # Получаем контакт из AMO
     time.sleep(1)
     contact = get_contact(contact_id)
     if not contact:
         return jsonify({"error": "contact not found"}), 404
 
-    # ✅ ГЛАВНАЯ ЗАЩИТА ОТ ЗАЦИКЛИВАНИЯ
-    # Если имя уже заполнено — ничего не делаем
     existing_first = contact.get("first_name", "").strip()
     existing_last = contact.get("last_name", "").strip()
     if existing_first or existing_last:
         print(f"Name already set: '{existing_first} {existing_last}', skipping")
-        return jsonify({"status": "skipped", "reason": "name already set"}), 200
+        return jsonify({"status": "skipped"}), 200
 
-    # Берём телефон
     phone = None
     for field in contact.get("custom_fields_values", []) or []:
         if field.get("field_code") == "PHONE":
