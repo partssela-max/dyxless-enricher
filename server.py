@@ -31,12 +31,6 @@ def search_by_phone(phone):
             return {"first_name": first, "last_name": last}
     return {}
 
-def get_contact(contact_id):
-    url = f"https://{AMO_DOMAIN}/api/v4/contacts/{contact_id}"
-    headers = {"Authorization": f"Bearer {AMO_ACCESS_TOKEN}"}
-    r = requests.get(url, headers=headers)
-    return r.json()
-
 def update_contact(contact_id, first_name, last_name):
     url = f"https://{AMO_DOMAIN}/api/v4/contacts/{contact_id}"
     headers = {
@@ -53,15 +47,35 @@ def update_contact(contact_id, first_name, last_name):
 
 @app.route("/enrich", methods=["POST"])
 def enrich():
-    body = request.json or {}
-    contact_id = body.get("contact_id")
-    phone = body.get("phone")
+    # Вебхук от AmoCRM приходит как form-data
+    data = request.form
+
+    # Извлекаем contact_id
+    contact_id = None
+    for key in data:
+        if "contacts[add][0][id]" in key:
+            contact_id = data[key]
+            break
+        if "contacts[update][0][id]" in key:
+            contact_id = data[key]
+            break
 
     if not contact_id:
-        return jsonify({"error": "contact_id required"}), 400
+        return jsonify({"error": "no contact_id"}), 400
 
+    # Извлекаем телефон из вебхука
+    phone = None
+    for key in data:
+        if "phone" in key.lower() and "value" in key.lower():
+            phone = data[key]
+            break
+
+    # Если телефона нет в вебхуке — берём из API
     if not phone:
-        contact = get_contact(int(contact_id))
+        url = f"https://{AMO_DOMAIN}/api/v4/contacts/{contact_id}"
+        headers = {"Authorization": f"Bearer {AMO_ACCESS_TOKEN}"}
+        r = requests.get(url, headers=headers)
+        contact = r.json()
         for field in contact.get("custom_fields_values", []) or []:
             if field.get("field_code") == "PHONE":
                 vals = field.get("values", [])
@@ -74,9 +88,9 @@ def enrich():
 
     info = search_by_phone(phone)
     if not info:
-        return jsonify({"error": "person not found", "phone": phone}), 404
+        return jsonify({"error": "person not found"}), 404
 
-    result = update_contact(int(contact_id), info.get("first_name", ""), info.get("last_name", ""))
+    update_contact(contact_id, info.get("first_name", ""), info.get("last_name", ""))
     return jsonify({"status": "ok", "found": info})
 
 @app.route("/", methods=["GET"])
