@@ -28,7 +28,10 @@ def search_by_phone(phone):
         first = entry.get("first_name", "")
         last = entry.get("last_name", "")
         if first or last:
-            return {"first_name": first, "last_name": last}
+            return {
+                "first_name": first.strip().capitalize(),
+                "last_name": last.strip().capitalize()
+            }
     return {}
 
 def update_contact(contact_id, first_name, last_name):
@@ -47,10 +50,8 @@ def update_contact(contact_id, first_name, last_name):
 
 @app.route("/enrich", methods=["POST"])
 def enrich():
-    # Вебхук от AmoCRM приходит как form-data
     data = request.form
 
-    # Извлекаем contact_id
     contact_id = None
     for key in data:
         if "contacts[add][0][id]" in key:
@@ -63,14 +64,12 @@ def enrich():
     if not contact_id:
         return jsonify({"error": "no contact_id"}), 400
 
-    # Извлекаем телефон из вебхука
     phone = None
     for key in data:
         if "phone" in key.lower() and "value" in key.lower():
             phone = data[key]
             break
 
-    # Если телефона нет в вебхуке — берём из API
     if not phone:
         url = f"https://{AMO_DOMAIN}/api/v4/contacts/{contact_id}"
         headers = {"Authorization": f"Bearer {AMO_ACCESS_TOKEN}"}
