@@ -32,15 +32,9 @@ def search_by_phone(phone):
                 first = entry.get("first_name", "").strip()
                 last = entry.get("last_name", "").strip()
                 if first and last:
-                    return {
-                        "first_name": first.capitalize(),
-                        "last_name": last.capitalize()
-                    }
+                    return {"first_name": first.capitalize(), "last_name": last.capitalize()}
                 if (first or last) and not best:
-                    best = {
-                        "first_name": first.capitalize(),
-                        "last_name": last.capitalize()
-                    }
+                    best = {"first_name": first.capitalize(), "last_name": last.capitalize()}
             return best
         except Exception as e:
             print(f"Dyxless attempt {attempt+1} failed: {e}")
@@ -73,37 +67,31 @@ def update_contact(contact_id, first_name, last_name):
     try:
         r = requests.patch(url, json=payload, headers=headers, timeout=10)
         print(f"AMO update status: {r.status_code}")
-        return r.json()
+        return r.status_code
     except Exception as e:
         print(f"AMO update error: {e}")
-        return {}
+        return 0
 
 @app.route("/enrich", methods=["POST"])
 def enrich():
     data = request.form
-
     contact_id = None
     for key in data:
         if "contacts[add][0][id]" in key or "contacts[update][0][id]" in key:
             contact_id = data[key]
             break
-
     if not contact_id:
         return jsonify({"error": "no contact_id"}), 400
-
     print(f"Contact ID: {contact_id}")
-
     time.sleep(1)
     contact = get_contact(contact_id)
     if not contact:
         return jsonify({"error": "contact not found"}), 404
-
     existing_first = contact.get("first_name", "").strip()
     existing_last = contact.get("last_name", "").strip()
     if existing_first or existing_last:
         print(f"Name already set: '{existing_first} {existing_last}', skipping")
         return jsonify({"status": "skipped"}), 200
-
     phone = None
     for field in contact.get("custom_fields_values", []) or []:
         if field.get("field_code") == "PHONE":
@@ -111,20 +99,67 @@ def enrich():
             if vals:
                 phone = vals[0].get("value", "")
                 break
-
     print(f"Phone: {phone}")
-
     if not phone:
         return jsonify({"error": "phone not found"}), 404
-
     info = search_by_phone(phone)
     print(f"Dyxless result: {info}")
-
     if not info:
         return jsonify({"error": "person not found"}), 404
-
     update_contact(contact_id, info.get("first_name", ""), info.get("last_name", ""))
     return jsonify({"status": "ok", "found": info})
+
+@app.route("/bulk", methods=["GET"])
+def bulk():
+    since = int(time.time()) - 86400
+    headers = {"Authorization": f"Bearer {AMO_ACCESS_TOKEN}"}
+    contacts = []
+    page = 1
+    while True:
+        r = requests.get(
+            f"https://{AMO_DOMAIN}/api/v4/contacts",
+            headers=headers,
+            params={"page": page, "limit": 250, "filter[created_at][from]": since},
+            timeout=15
+        )
+        if r.status_code != 200:
+            break
+        data = r.json()
+        items = data.get("_embedded", {}).get("contacts", [])
+        if not items:
+            break
+        contacts.extend(items)
+        if len(items) < 250:
+            break
+        page += 1
+
+    results = []
+    for contact in contacts:
+        contact_id = contact["id"]
+        first = contact.get("first_name", "").strip()
+        last = contact.get("last_name", "").strip()
+        if first or last:
+            continue
+        phone = None
+        for field in contact.get("custom_fields_values", []) or []:
+            if field.get("field_code") == "PHONE":
+                vals = field.get("values", [])
+                if vals:
+                    phone = vals[0].get("value", "")
+                    break
+        if not phone:
+            continue
+        info = search_by_phone(phone)
+        if info:
+            update_contact(contact_id, info.get("first_name", ""), info.get("last_name", ""))
+            results.append({
+                "id": contact_id,
+                "phone": phone,
+                "name": f"{info.get('first_name','')} {info.get('last_name','')}".strip()
+            })
+        time.sleep(1)
+
+    return jsonify({"status": "ok", "processed": len(results), "results": results})
 
 @app.route("/", methods=["GET"])
 def health():
