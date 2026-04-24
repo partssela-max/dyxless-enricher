@@ -181,7 +181,7 @@ def bulk():
 
 @app.route("/bulk-ats", methods=["GET"])
 def bulk_ats():
-    batch = int(request.args.get("batch", 5))
+    batch = int(request.args.get("batch", 3))
     offset = int(request.args.get("offset", 0))
     headers = {"Authorization": f"Bearer {AMO_ACCESS_TOKEN}"}
     contacts = []
@@ -203,7 +203,7 @@ def bulk_ats():
         if len(items) < 250:
             break
         page += 1
-        if len(contacts) >= 2000:
+        if len(contacts) >= 500:
             break
 
     ats_contacts = [c for c in contacts if is_ats(c)]
