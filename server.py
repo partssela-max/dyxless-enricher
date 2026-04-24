@@ -87,11 +87,18 @@ def enrich():
     contact = get_contact(contact_id)
     if not contact:
         return jsonify({"error": "contact not found"}), 404
+
     existing_first = contact.get("first_name", "").strip()
     existing_last = contact.get("last_name", "").strip()
-    if existing_first or existing_last:
+    existing_name = contact.get("name", "").strip()
+
+    ats_keywords = ["входящий", "исходящий", "звонок", "пропущен", "вызов"]
+    is_ats_name = any(kw in existing_name.lower() for kw in ats_keywords)
+
+    if (existing_first or existing_last) and not is_ats_name:
         print(f"Name already set: '{existing_first} {existing_last}', skipping")
         return jsonify({"status": "skipped"}), 200
+
     phone = None
     for field in contact.get("custom_fields_values", []) or []:
         if field.get("field_code") == "PHONE":
