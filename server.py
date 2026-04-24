@@ -9,6 +9,8 @@ DYXLESS_TOKEN = os.environ.get("DYXLESS_TOKEN")
 AMO_ACCESS_TOKEN = os.environ.get("AMO_ACCESS_TOKEN")
 AMO_DOMAIN = os.environ.get("AMO_DOMAIN")
 
+ATS_KEYWORDS = ["входящий", "исходящий", "звонок", "пропущен", "вызов"]
+
 def clean_phone(phone):
     for ch in ["+", " ", "-", "(", ")", "\t"]:
         phone = phone.replace(ch, "")
@@ -72,6 +74,11 @@ def update_contact(contact_id, first_name, last_name):
         print(f"AMO update error: {e}")
         return 0
 
+def is_ats(contact):
+    name = contact.get("name", "").strip().lower()
+    first = contact.get("first_name", "").strip().lower()
+    return any(kw in name or kw in first for kw in ATS_KEYWORDS)
+
 @app.route("/enrich", methods=["POST"])
 def enrich():
     data = request.form
@@ -90,12 +97,8 @@ def enrich():
 
     existing_first = contact.get("first_name", "").strip()
     existing_last = contact.get("last_name", "").strip()
-    existing_name = contact.get("name", "").strip()
 
-    ats_keywords = ["входящий", "исходящий", "звонок", "пропущен", "вызов"]
-    is_ats_name = any(kw in existing_name.lower() for kw in ats_keywords)
-
-    if (existing_first or existing_last) and not is_ats_name:
+    if (existing_first or existing_last) and not is_ats(contact):
         print(f"Name already set: '{existing_first} {existing_last}', skipping")
         return jsonify({"status": "skipped"}), 200
 
@@ -173,6 +176,67 @@ def bulk():
         "offset": offset,
         "processed": len(results),
         "next": f"/bulk?offset={offset + batch}" if offset + batch < len(empty) else "done",
+        "results": results
+    })
+
+@app.route("/bulk-ats", methods=["GET"])
+def bulk_ats():
+    batch = int(request.args.get("batch", 5))
+    offset = int(request.args.get("offset", 0))
+    headers = {"Authorization": f"Bearer {AMO_ACCESS_TOKEN}"}
+    contacts = []
+    page = 1
+    while True:
+        r = requests.get(
+            f"https://{AMO_DOMAIN}/api/v4/contacts",
+            headers=headers,
+            params={"page": page, "limit": 250},
+            timeout=15
+        )
+        if r.status_code != 200:
+            break
+        data = r.json()
+        items = data.get("_embedded", {}).get("contacts", [])
+        if not items:
+            break
+        contacts.extend(items)
+        if len(items) < 250:
+            break
+        page += 1
+        if len(contacts) >= 2000:
+            break
+
+    ats_contacts = [c for c in contacts if is_ats(c)]
+    chunk = ats_contacts[offset:offset + batch]
+
+    results = []
+    for contact in chunk:
+        contact_id = contact["id"]
+        phone = None
+        for field in contact.get("custom_fields_values", []) or []:
+            if field.get("field_code") == "PHONE":
+                vals = field.get("values", [])
+                if vals:
+                    phone = vals[0].get("value", "")
+                    break
+        if not phone:
+            continue
+        info = search_by_phone(phone)
+        if info:
+            update_contact(contact_id, info.get("first_name", ""), info.get("last_name", ""))
+            results.append({
+                "id": contact_id,
+                "phone": phone,
+                "name": f"{info.get('first_name','')} {info.get('last_name','')}".strip()
+            })
+        time.sleep(1)
+
+    return jsonify({
+        "status": "ok",
+        "total_ats": len(ats_contacts),
+        "offset": offset,
+        "processed": len(results),
+        "next": f"/bulk-ats?offset={offset + batch}" if offset + batch < len(ats_contacts) else "done",
         "results": results
     })
 
