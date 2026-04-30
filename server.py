@@ -81,43 +81,54 @@ def is_ats(contact):
 
 @app.route("/enrich", methods=["POST"])
 def enrich():
-    data = request.form
-    contact_id = None
-    for key in data:
-        if "contacts[add][0][id]" in key or "contacts[update][0][id]" in key:
-            contact_id = data[key]
-            break
-    if not contact_id:
-        return jsonify({"error": "no contact_id"}), 400
-    print(f"Contact ID: {contact_id}")
-    time.sleep(1)
-    contact = get_contact(contact_id)
-    if not contact:
-        return jsonify({"error": "contact not found"}), 404
-
-    existing_first = contact.get("first_name", "").strip()
-    existing_last = contact.get("last_name", "").strip()
-
-    if (existing_first or existing_last) and not is_ats(contact):
-        print(f"Name already set: '{existing_first} {existing_last}', skipping")
-        return jsonify({"status": "skipped"}), 200
-
-    phone = None
-    for field in contact.get("custom_fields_values", []) or []:
-        if field.get("field_code") == "PHONE":
-            vals = field.get("values", [])
-            if vals:
-                phone = vals[0].get("value", "")
+    try:
+        data = request.form
+        contact_id = None
+        for key in data:
+            if "contacts[add][0][id]" in key or "contacts[update][0][id]" in key:
+                contact_id = data[key]
                 break
-    print(f"Phone: {phone}")
-    if not phone:
-        return jsonify({"error": "phone not found"}), 404
-    info = search_by_phone(phone)
-    print(f"Dyxless result: {info}")
-    if not info:
-        return jsonify({"error": "person not found"}), 404
-    update_contact(contact_id, info.get("first_name", ""), info.get("last_name", ""))
-    return jsonify({"status": "ok", "found": info})
+        if not contact_id:
+            print("No contact_id found")
+            return jsonify({"status": "ok", "msg": "no contact_id"}), 200
+
+        print(f"Contact ID: {contact_id}")
+        time.sleep(1)
+        contact = get_contact(contact_id)
+        if not contact:
+            print(f"Contact {contact_id} not found")
+            return jsonify({"status": "ok", "msg": "contact not found"}), 200
+
+        existing_first = contact.get("first_name", "").strip()
+        existing_last = contact.get("last_name", "").strip()
+
+        if (existing_first or existing_last) and not is_ats(contact):
+            print(f"Name already set: '{existing_first} {existing_last}', skipping")
+            return jsonify({"status": "ok", "msg": "skipped"}), 200
+
+        phone = None
+        for field in contact.get("custom_fields_values", []) or []:
+            if field.get("field_code") == "PHONE":
+                vals = field.get("values", [])
+                if vals:
+                    phone = vals[0].get("value", "")
+                    break
+
+        print(f"Phone: {phone}")
+        if not phone:
+            return jsonify({"status": "ok", "msg": "no phone"}), 200
+
+        info = search_by_phone(phone)
+        print(f"Dyxless result: {info}")
+        if not info:
+            return jsonify({"status": "ok", "msg": "not found in dyxless"}), 200
+
+        update_contact(contact_id, info.get("first_name", ""), info.get("last_name", ""))
+        return jsonify({"status": "ok", "found": info}), 200
+
+    except Exception as e:
+        print(f"Enrich error: {e}")
+        return jsonify({"status": "ok", "msg": "error handled"}), 200
 
 @app.route("/bulk", methods=["GET"])
 def bulk():
