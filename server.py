@@ -21,7 +21,7 @@ def search_by_phone(phone):
     for attempt in range(3):
         try:
             r = requests.post(
-                "https://api.dyxless.at/query",
+                "https://dyx.lol/query",
                 json={"token": DYXLESS_TOKEN, "query": phone},
                 headers={"Content-Type": "application/json"},
                 timeout=30
